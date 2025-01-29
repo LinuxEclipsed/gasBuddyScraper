@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 
 # Function to get the gas price from GasBuddy
-def getGasPrice():
+def getGasPrice(station_id):
     url = "https://www.gasbuddy.com/graphql"
     headers = {
         'content-type': 'application/json',
@@ -14,7 +14,7 @@ def getGasPrice():
     data = {
         "operationName": "GetStation",
         "variables": {
-            "id": "177667"  # Example station ID
+            "id": station_id  # Use the provided station ID
         },
         "query": "query GetStation($id: ID!) { station(id: $id) { prices { credit { nickname postedTime price } } } }"
     }
@@ -68,6 +68,10 @@ def main():
     url = os.getenv('INFLUXDB_URL', 'http://localhost:8086')
     bucket = os.getenv('INFLUXDB_BUCKET', 'gas_prices')
     scrapeTime = int(os.getenv('SCRAPE_TIME', 24))  # Default scrape interval is 24 hours
+    station_id = os.getenv('STATION_ID')  # Get the station ID from environment variables
+
+    if not station_id:
+        raise ValueError("STATION_ID environment variable is required.")
 
     # Initialize the InfluxDB client
     client = InfluxDBClient(url=url, token=token, org=org)
@@ -79,7 +83,7 @@ def main():
     try:
         while True:
             # Get gas price from GasBuddy
-            gasPrice = getGasPrice()
+            gasPrice = getGasPrice(station_id)
 
             # Write the gas price to InfluxDB if available
             if gasPrice:
