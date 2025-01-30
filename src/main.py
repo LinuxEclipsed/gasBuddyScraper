@@ -1,7 +1,6 @@
 import requests
 from influxdb_client import InfluxDBClient, Point, WritePrecision, BucketsApi
 from influxdb_client.client.write_api import WriteOptions
-import time
 import os
 from datetime import datetime
 
@@ -10,6 +9,9 @@ def getGasPrice(station_id):
     url = "https://www.gasbuddy.com/graphql"
     headers = {
         'content-type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',  # Mimic a browser
+        'Origin': 'https://www.gasbuddy.com',  # Add Origin header
+        'Referer': 'https://www.gasbuddy.com/',  # Add Referer header
     }
     data = {
         "operationName": "GetStation",
@@ -18,13 +20,21 @@ def getGasPrice(station_id):
         },
         "query": "query GetStation($id: ID!) { station(id: $id) { prices { credit { nickname postedTime price } } } }"
     }
-    response = requests.post(url, headers=headers, json=data)
 
-    if response.status_code == 200:
-        json_response = response.json()
-        # Extract the price from the response
-        price = json_response['data']['station']['prices'][0]['credit']['price']
-        return float(price)
+    # Use a session to handle cookies
+    with requests.Session() as session:
+        response = session.post(url, headers=headers, json=data)
+
+        if response.status_code == 200:
+            json_response = response.json()
+            # Safely extract the price from the response
+            try:
+                prices = json_response['data']['station']['prices']
+                if prices and prices[0]['credit']:
+                    price = prices[0]['credit']['price']
+                    return float(price)
+            except KeyError:
+                pass  # Ignore errors if the data structure is unexpected
     return None
 
 # Check if the bucket exists, create it if it doesn't
@@ -48,17 +58,21 @@ def saveToInfluxDB(price, client, bucket, org, source):
     # Initialize the write API with WriteOptions
     writeApi = client.write_api(write_options=WriteOptions(batch_size=1))
 
-    # Prepare data point to write
-    point = (
-        Point("gas_price")
-        .tag("source", source)  # Tag with the source of the price
-        .field("price", price)
-        .time(datetime.utcnow(), WritePrecision.NS)  # Add the timestamp
-    )
+    try:
+        # Prepare data point to write
+        point = (
+            Point("gas_price")
+            .tag("source", source)  # Tag with the source of the price
+            .field("price", price)
+            .time(datetime.utcnow(), WritePrecision.NS)  # Add the timestamp
+        )
 
-    # Write the data point to the specified bucket
-    writeApi.write(bucket=bucket, org=org, record=point)
-    print(f"Price {price} from {source} written to InfluxDB.")
+        # Write the data point to the specified bucket
+        writeApi.write(bucket=bucket, org=org, record=point)
+        print(f"Price {price} from {source} written to InfluxDB.")
+    finally:
+        # Ensure the writeApi is properly closed
+        writeApi.close()
 
 # Main function
 def main():
@@ -67,7 +81,6 @@ def main():
     org = os.getenv('INFLUXDB_ORG')
     url = os.getenv('INFLUXDB_URL', 'http://localhost:8086')
     bucket = os.getenv('INFLUXDB_BUCKET', 'gas_prices')
-    scrapeTime = int(os.getenv('SCRAPE_TIME', 24))  # Default scrape interval is 24 hours
     station_id = os.getenv('STATION_ID')  # Get the station ID from environment variables
 
     if not station_id:
@@ -79,26 +92,18 @@ def main():
     # Ensure the bucket exists, or create it
     ensureBucketExists(client, bucket, org)
 
-    # Infinite loop to check the gas prices
-    try:
-        while True:
-            # Get gas price from GasBuddy
-            gasPrice = getGasPrice(station_id)
+    # Get gas price from GasBuddy
+    gasPrice = getGasPrice(station_id)
 
-            # Write the gas price to InfluxDB if available
-            if gasPrice:
-                print(f"Extracted GasBuddy price: {gasPrice}")
-                saveToInfluxDB(gasPrice, client, bucket, org, "GasBuddy")
-            else:
-                print("Failed to extract the GasBuddy price.")
+    # Write the gas price to InfluxDB if available
+    if gasPrice:
+        print(f"Extracted GasBuddy price: {gasPrice}")
+        saveToInfluxDB(gasPrice, client, bucket, org, "Roseville-Costco")
+    else:
+        print("Failed to extract the GasBuddy price.")
 
-            # Sleep for the specified interval before the next check
-            print("Waiting for the next check...")
-            time.sleep(scrapeTime * 60 * 60)
-
-    except KeyboardInterrupt:
-        print("Stopping the loop...")
-        client.close()
+    # Close the InfluxDB client
+    client.close()
 
 if __name__ == "__main__":
     main()
