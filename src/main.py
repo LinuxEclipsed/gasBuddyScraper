@@ -81,10 +81,13 @@ def main():
     org = os.getenv('INFLUXDB_ORG')
     url = os.getenv('INFLUXDB_URL', 'http://localhost:8086')
     bucket = os.getenv('INFLUXDB_BUCKET', 'gas_prices')
-    station_id = os.getenv('STATION_ID')  # Get the station ID from environment variables
+    
+    # Get the station IDs and names from environment variables
+    station_ids = os.getenv('STATION_IDS', '').split(',')
+    station_names = os.getenv('STATION_NAMES', '').split(',')
 
-    if not station_id:
-        raise ValueError("STATION_ID environment variable is required.")
+    if not station_ids or not station_names or len(station_ids) != len(station_names):
+        raise ValueError("STATION_IDS and STATION_NAMES environment variables are required and must be of the same length.")
 
     # Initialize the InfluxDB client
     client = InfluxDBClient(url=url, token=token, org=org)
@@ -92,15 +95,17 @@ def main():
     # Ensure the bucket exists, or create it
     ensureBucketExists(client, bucket, org)
 
-    # Get gas price from GasBuddy
-    gasPrice = getGasPrice(station_id)
+    # Iterate over the station IDs and names
+    for station_id, station_name in zip(station_ids, station_names):
+        # Get gas price from GasBuddy
+        gasPrice = getGasPrice(station_id)
 
-    # Write the gas price to InfluxDB if available
-    if gasPrice:
-        print(f"Extracted GasBuddy price: {gasPrice}")
-        saveToInfluxDB(gasPrice, client, bucket, org, "Roseville-Costco")
-    else:
-        print("Failed to extract the GasBuddy price.")
+        # Write the gas price to InfluxDB if available
+        if gasPrice:
+            print(f"Extracted GasBuddy price for {station_name}: {gasPrice}")
+            saveToInfluxDB(gasPrice, client, bucket, org, station_name)
+        else:
+            print(f"Failed to extract the GasBuddy price for {station_name}.")
 
     # Close the InfluxDB client
     client.close()

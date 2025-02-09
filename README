@@ -1,0 +1,5 @@
+## Set Environment Variables:
+
+- STATION_IDS: Comma-separated list of station IDs (e.g., 12345,67890).
+
+- STATION_NAMES: Comma-separated list of station names (e.g., Roseville-Costco,Sacramento-Costco).
